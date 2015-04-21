@@ -1,12 +1,9 @@
 cmake_minimum_required(VERSION 2.8)
 
-set(LIBRARY ethash-cl)
+set(LIBRARY ethash-cuda)
 set(CMAKE_BUILD_TYPE Release)
 
-include(bin2h.cmake)
-bin2h(SOURCE_FILE ethash_cl_miner_kernel.cl
-      VARIABLE_NAME ethash_cl_miner_kernel
-      HEADER_FILE ${CMAKE_CURRENT_BINARY_DIR}/ethash_cl_miner_kernel.h)
+include_directories(/export/home/fils/stud/g/grigore.lupescu/ethereum/cryptopp)
 
 if (NOT MSVC)
 	# Initialize CXXFLAGS for c++11
@@ -30,18 +27,16 @@ if (NOT MSVC)
     endif ()
 endif()
 
-set(OpenCL_FOUND TRUE)
-set(OpenCL_INCLUDE_DIRS /usr/include/CL)
-set(OpenCL_LIBRARIES -lOpenCL)
+set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS};-gencode arch=compute_20,code=sm_20)
 
-if (NOT OpenCL_FOUND)
-	find_package(OpenCL)
+if (NOT CUDA_FOUND)
+	find_package(CUDA)
 endif()
 
-if (OpenCL_FOUND)
+if (CUDA_FOUND)
 	set(CMAKE_CXX_FLAGS "-std=c++11 -Wall -Wno-unknown-pragmas -Wextra -pedantic -fPIC ${CMAKE_CXX_FLAGS}")
-	include_directories(${OpenCL_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR})
+	include_directories(${CUDA_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR})
 	include_directories(..)
-	add_library(${LIBRARY} ethash_cl_miner.cpp ethash_cl_miner.h cl.hpp)
-	TARGET_LINK_LIBRARIES(${LIBRARY} ${OpenCL_LIBRARIES} ethash)
+	CUDA_ADD_LIBRARY(${LIBRARY} ethash_cuda_miner.cpp ethash_cuda_miner.h)
+	TARGET_LINK_LIBRARIES(${LIBRARY} ${CUDA_LIBRARIES} ethash)
 endif()
