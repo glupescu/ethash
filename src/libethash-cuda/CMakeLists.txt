@@ -7,11 +7,6 @@ include_directories(/export/home/fils/stud/g/grigore.lupescu/ethereum/cryptopp)
 
 if (NOT MSVC)
 	# Initialize CXXFLAGS for c++11
-    set(CMAKE_CXX_FLAGS                "-Wall -std=c++11")
-    set(CMAKE_CXX_FLAGS_DEBUG          "-O0 -g")
-    set(CMAKE_CXX_FLAGS_MINSIZEREL     "-Os -DNDEBUG")
-    set(CMAKE_CXX_FLAGS_RELEASE        "-O4 -DNDEBUG")
-    set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g")
 
     # Compiler-specific C++11 activation.
     if ("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
@@ -34,9 +29,8 @@ if (NOT CUDA_FOUND)
 endif()
 
 if (CUDA_FOUND)
-	set(CMAKE_CXX_FLAGS "-std=c++11 -Wall -Wno-unknown-pragmas -Wextra -pedantic -fPIC ${CMAKE_CXX_FLAGS}")
 	include_directories(${CUDA_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR})
 	include_directories(..)
-	CUDA_ADD_LIBRARY(${LIBRARY} ethash_cuda_miner.cpp ethash_cuda_miner.h)
+	CUDA_ADD_LIBRARY(${LIBRARY} ethash_cuda_miner.cu ethash_cuda_miner.h)
 	TARGET_LINK_LIBRARIES(${LIBRARY} ${CUDA_LIBRARIES} ethash)
 endif()
