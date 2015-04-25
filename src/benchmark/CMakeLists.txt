@@ -33,6 +33,12 @@ if (OpenCL_FOUND)
   list(APPEND FILES ethash_cl_miner.cpp ethash_cl_miner.h)
 endif()
 
+if (CUDA_FOUND)
+  add_definitions(-DWITH_CUDA)
+  include_directories(${CUDA_INCLUDE_DIRS})
+  list(APPEND FILES ethash_cuda_miner.cpp ethash_cuda_miner.h)
+endif()
+
 if (MPI_FOUND)
   include_directories(${MPI_INCLUDE_PATH})
   add_executable (Benchmark_MPI_FULL benchmark.cpp)

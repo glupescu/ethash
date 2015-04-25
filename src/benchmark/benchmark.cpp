@@ -19,13 +19,17 @@
  * @date 2015
  */
 
+#include <iostream>
 #include <stdio.h>
 #include <stdlib.h>
 #include <chrono>
 #include <libethash/ethash.h>
 #include <libethash/util.h>
-#ifdef OPENCL
-#include <libethash-cl/ethash_cl_miner.h>
+
+#define CUDA 1
+
+#ifdef CUDA
+#include <libethash-cuda/ethash_cuda_miner.h>
 #endif
 #include <vector>
 #include <algorithm>
@@ -41,6 +45,9 @@
 #undef min
 #undef max
 
+#undef OPENCL
+
+using namespace std;
 using std::chrono::high_resolution_clock;
 
 #if defined(OPENCL)
@@ -54,7 +61,8 @@ uint8_t g_hashes[1024*32];
 
 static char nibbleToChar(unsigned nibble)
 {
-	return (char) ((nibble >= 10 ? 'a'-10 : '0') + nibble);
+	return (char) ((nibble >=
+10 ? 'a'-10 : '0') + nibble);
 }
 
 static uint8_t charToNibble(char chr)
@@ -114,6 +122,24 @@ extern "C" int main(void)
 	ethash_h256_t seed;
 	ethash_h256_t previous_hash;
 
+#ifdef OPENCL
+	cout << "OPENCL defined" << endl;
+#endif
+
+#ifdef CUDA
+	cout << "CUDA defined" << endl;
+#endif
+
+#ifdef FULL
+	cout << "FULL defined" << endl;
+#endif
+
+#if defined(OPENCL) || defined(CUDA) || defined (FULL)
+	cout << "OPENCL || CUDA || FULL defined" << endl;
+#else
+	cout << "nothing actually defined" << endl;
+#endif
+
 	memcpy(&seed, hexStringToBytes("9410b944535a83d9adf6bbdcc80e051f30676173c16ca0d32d6f1263fc246466").data(), 32);
 	memcpy(&previous_hash, hexStringToBytes("c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470").data(), 32);
 
@@ -157,6 +183,13 @@ extern "C" int main(void)
 
 #ifdef OPENCL
 	ethash_cl_miner miner;
+#endif
+
+#ifdef CUDA
+	ethash_cuda_miner miner;
+#endif
+
+#if defined(OPENCL) || defined(CUDA)
 	{
 		auto startTime = high_resolution_clock::now();
 		if (!miner.init(params, &seed))
@@ -165,7 +198,6 @@ extern "C" int main(void)
 		debugf("ethash_cl_miner init: %ums\n", (unsigned)time);
 	}
 #endif
-
 
 #ifdef FULL
 	{
@@ -177,7 +209,7 @@ extern "C" int main(void)
 	}
 #endif
 
-#ifdef OPENCL
+#if defined(OPENCL) || defined(CUDA)
 	// validate 1024 hashes against CPU
 	miner.hash(g_hashes, (uint8_t*)&previous_hash, 0, 1024);
 	for (unsigned i = 0; i != 1024; ++i)
@@ -202,9 +234,9 @@ extern "C" int main(void)
 	auto startTime = high_resolution_clock::now();
 	unsigned hash_count = trials;
 
-	#ifdef OPENCL
+#if defined(OPENCL) || defined(CUDA)
 	{
-		struct search_hook : ethash_cl_miner::search_hook
+		struct search_hook : ethash_cuda_miner::search_hook
 		{
 			unsigned hash_count;
 			std::vector<uint64_t> nonce_vec;
@@ -255,7 +287,7 @@ extern "C" int main(void)
 	debugf("Search took: %ums\n", (unsigned)time/1000);
 
 	unsigned read_size = ACCESSES * MIX_BYTES;
-#if defined(OPENCL) || defined(FULL)
+#if defined(OPENCL) || defined(CUDA) || defined(FULL)
 	debugf(
 		"hashrate: %8.2f Mh/s, bw: %8.2f GB/s\n",
 		(double)hash_count * (1000*1000)/time / (1000*1000),
