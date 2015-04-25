@@ -29,4 +29,9 @@ private:
 	static unsigned const c_search_batch_size = 1024*256;
 
 	ethash_params m_params;
+	char* m_dag;
+	char* m_header;
+	char* m_hash_buf[c_num_buffers];
+	char* m_search_buf[c_num_buffers];
+	unsigned m_workgroup_size;
 };
