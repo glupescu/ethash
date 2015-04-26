@@ -46,21 +46,12 @@
 /////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////
 
-
-
-
-// author Tim Hughes <tim@twistedfury.com>
-// Tested on Radeon HD 7850
-// Hashrate: 15940347 hashes/s
-// Bandwidth: 124533 MB/s
-// search kernel should fit in <= 84 VGPRS (3 wavefronts)
-
 #define THREADS_PER_HASH (128 / 16)
 #define HASHES_PER_LOOP (GROUP_SIZE / THREADS_PER_HASH)
 
 #define FNV_PRIME	0x01000193
 
-const uint2 Keccak_f1600_RC[24] = {
+ uint2 Keccak_f1600_RC[24] = {
 	{0x00000001, 0x00000000},
 	{0x00008082, 0x00000000},
 	{0x0000808a, 0x80000000},
@@ -266,11 +257,16 @@ __device__ uint fnv(uint x, uint y)
 	return x * FNV_PRIME ^ y;
 }
 
-__device__ uint4 fnv4(uint4 x, uint4 y)
+__device__ uint4 fnv4(uint4 a, uint4 b)
 {
-	// TODO
-	//return x * FNV_PRIME ^ y;
-	return {0, 0, 0, 0};
+	uint4 res;
+
+	res.x = a.x * FNV_PRIME ^ b.x;
+	res.y = a.y * FNV_PRIME ^ b.y;
+	res.z = a.z * FNV_PRIME ^ b.z;
+	res.w = a.w * FNV_PRIME ^ b.w;
+
+	return res;
 }
 
 __device__ uint fnv_reduce(uint4 v)
@@ -296,7 +292,7 @@ typedef union
 	uint4 uint4s[128 / sizeof(uint4)];
 } hash128_t;
 
-__device__ hash64_t init_hash(const hash32_t const* header, ulong nonce, uint isolate)
+__device__ hash64_t init_hash( hash32_t const* header, ulong nonce, uint isolate)
 {
 	hash64_t init;
 	uint const init_size = countof(init.ulongs);
@@ -319,7 +315,8 @@ __device__ uint inner_loop(uint4 init, uint thread_id, uint* share, hash128_t co
 	// share init0
 	if (thread_id == 0)
 		*share = mix.x;
-	//barrier(CLK_LOCAL_MEM_FENCE);
+
+	__threadfence_block();
 	uint init0 = *share;
 
 	uint a = 0;
@@ -335,7 +332,7 @@ __device__ uint inner_loop(uint4 init, uint thread_id, uint* share, hash128_t co
 				uint m[4] = { mix.x, mix.y, mix.z, mix.w };
 				*share = fnv(init0 ^ (a+i), m[i]) % DAG_SIZE;
 			}
-			//barrier(CLK_LOCAL_MEM_FENCE);
+			__threadfence_block();
 
 			mix = fnv4(mix, g_dag[*share].uint4s[thread_id]);
 		}
@@ -365,7 +362,7 @@ __device__ hash32_t final_hash(hash64_t const* init, hash32_t const* mix, uint i
 }
 
 __device__ hash32_t compute_hash_simple(
-	const hash32_t const* g_header,
+	 hash32_t const* g_header,
 	hash128_t const* g_dag,
 	ulong nonce,
 	uint isolate
@@ -418,13 +415,13 @@ typedef union
 
 __device__ hash32_t compute_hash(
 	compute_hash_share* share,
-	const hash32_t const* g_header,
+	 hash32_t const* g_header,
 	hash128_t const* g_dag,
 	ulong nonce,
 	uint isolate
 	)
 {
-	uint const gid = 4;//get_global_id(0);
+	uint const gid = blockIdx.x * blockDim.x + threadIdx.x;
 
 	// Compute one init hash per work item.
 	hash64_t init = init_hash(g_header, nonce, isolate);
@@ -440,19 +437,19 @@ __device__ hash32_t compute_hash(
 		// share init with other threads
 		if (i == thread_id)
 			share[hash_id].init = init;
-		//barrier(CLK_LOCAL_MEM_FENCE);
+		__threadfence_block();
 
 		uint4 thread_init = share[hash_id].init.uint4s[thread_id % (64 / sizeof(uint4))];
-		//barrier(CLK_LOCAL_MEM_FENCE);
+		__threadfence_block();
 
 		uint thread_mix = inner_loop(thread_init, thread_id, share[hash_id].mix.uints, g_dag, isolate);
 
 		share[hash_id].mix.uints[thread_id] = thread_mix;
-		//barrier(CLK_LOCAL_MEM_FENCE);
+		__threadfence_block();
 
 		if (i == thread_id)
 			mix = share[hash_id].mix;
-		//barrier(CLK_LOCAL_MEM_FENCE);
+		__threadfence_block();
 	}
 	while (++i != (THREADS_PER_HASH & isolate));
 
@@ -461,26 +458,26 @@ __device__ hash32_t compute_hash(
 
 __global__ void ethash_hash_simple(
 	hash32_t* g_hashes,
-	const hash32_t const* g_header,
+	 hash32_t const* g_header,
 	hash128_t const* g_dag,
 	ulong start_nonce,
 	uint isolate
 	)
 {
-	uint const gid = 4; //get_global_id(0);
+	uint const gid = blockIdx.x * blockDim.x + threadIdx.x;
 	g_hashes[gid] = compute_hash_simple(g_header, g_dag, start_nonce + gid, isolate);
 }
 
 __global__ void ethash_search_simple(
 	volatile uint* restrict g_output,
-	const hash32_t const* g_header,
+	 hash32_t const* g_header,
 	hash128_t const* g_dag,
 	ulong start_nonce,
 	ulong target,
 	uint isolate
 	)
 {
-	uint const gid = 0; //get_global_id(0);
+	uint const gid = blockIdx.x * blockDim.x + threadIdx.x;
 	hash32_t hash = compute_hash_simple(g_header, g_dag, start_nonce + gid, isolate);
 
 	if (hash.ulongs[countof(hash.ulongs)-1] < target)
@@ -494,7 +491,7 @@ __global__ void ethash_search_simple(
 
 __global__ void ethash_hash(
 	hash32_t* g_hashes,
-	const hash32_t const* g_header,
+	 hash32_t const* g_header,
 	hash128_t const* g_dag,
 	ulong start_nonce,
 	uint isolate
@@ -502,13 +499,13 @@ __global__ void ethash_hash(
 {
 	compute_hash_share share[HASHES_PER_LOOP];
 
-	uint const gid = 4; //get_global_id(0);
+	uint const gid = blockIdx.x * blockDim.x + threadIdx.x;
 	g_hashes[gid] = compute_hash(share, g_header, g_dag, start_nonce + gid, isolate);
 }
 
 __global__ void ethash_search(
 	volatile uint* restrict g_output,
-	const hash32_t const* g_header,
+	 hash32_t const* g_header,
 	hash128_t const* g_dag,
 	ulong start_nonce,
 	ulong target,
@@ -517,7 +514,7 @@ __global__ void ethash_search(
 {
 	compute_hash_share share[HASHES_PER_LOOP];
 
-	uint const gid = 4; //get_global_id(0);
+	uint const gid = blockIdx.x * blockDim.x + threadIdx.x;
 	hash32_t hash = compute_hash(share, g_header, g_dag, start_nonce + gid, isolate);
 
 	if (hash.ulongs[countof(hash.ulongs)-1] < target)
@@ -564,6 +561,8 @@ void ethash_cuda_miner::finish()
 
 bool ethash_cuda_miner::init(ethash_params const& params, ethash_h256_t const *seed, unsigned workgroup_size)
 {
+	printf("__INIT__");
+
 	// store params
 	m_params = params;
 
@@ -605,7 +604,7 @@ bool ethash_cuda_miner::init(ethash_params const& params, ethash_h256_t const *s
 }
 
 
-struct pending_batch
+struct pending_batch_1
 {
 	unsigned base;
 	unsigned count;
@@ -615,7 +614,9 @@ struct pending_batch
 void ethash_cuda_miner::hash(uint8_t* ret, uint8_t const* header, uint64_t nonce, unsigned count)
 {
 
-	std::queue<pending_batch> pending;
+	std::queue<pending_batch_1> pending;
+
+	printf("__HASH__");
 
 	cudaMemcpy( m_header, header, 32, cudaMemcpyHostToDevice);
 
@@ -628,10 +629,16 @@ void ethash_cuda_miner::hash(uint8_t* ret, uint8_t const* header, uint64_t nonce
 			unsigned const this_count = std::min(count - i, c_hash_batch_size);
 			unsigned const batch_count = std::max(this_count, m_workgroup_size);
 
+			pending_batch_1 temp_pending_batch;
+			temp_pending_batch.base = i;
+			temp_pending_batch.count = this_count;
+			temp_pending_batch.buf = buf;
 
 			// execute it!
+			ethash_hash<<<batch_count, m_workgroup_size>>>((hash32_t*)m_search_buf[buf],
+					(const hash32_t*)m_header, (const hash128_t*)m_dag, nonce, ~0U);
 
-			//pending.push({i, this_count, buf});
+			pending.push(temp_pending_batch);
 			i += this_count;
 			buf = (buf + 1) % c_num_buffers;
 		}
@@ -639,7 +646,7 @@ void ethash_cuda_miner::hash(uint8_t* ret, uint8_t const* header, uint64_t nonce
 		// read results
 		if (i == count || pending.size() == c_num_buffers)
 		{
-			pending_batch const& batch = pending.front();
+			pending_batch_1 const& batch = pending.front();
 
 			// could use pinned host pointer instead, but this path isn't that important.
 			uint8_t* hashes = (uint8_t*)malloc(batch.count * ETHASH_BYTES* sizeof(uint8_t));
@@ -652,8 +659,82 @@ void ethash_cuda_miner::hash(uint8_t* ret, uint8_t const* header, uint64_t nonce
 }
 
 
+struct pending_batch_2
+{
+	uint64_t start_nonce;
+	unsigned buf;
+};
+
 void ethash_cuda_miner::search(uint8_t const* header, uint64_t target, search_hook& hook)
 {
+	std::queue<pending_batch_2> pending;
 
+	printf("__SEARCH__");
+
+	static uint32_t const c_zero = 0;
+
+	// update header constant buffer
+	//m_queue.enqueueWriteBuffer(m_header, false, 0, 32, header);
+	cudaMemcpy(m_header, header, 32, cudaMemcpyHostToDevice);
+
+	for (unsigned i = 0; i != c_num_buffers; ++i)
+	{
+		//m_queue.enqueueWriteBuffer(m_search_buf[i], false, 0, 4, &c_zero);
+		cudaMemcpy( m_search_buf[i], c_zero, 4, cudaMemcpyHostToDevice);
+	}
+
+	{
+		//m_queue.finish();
+	}
+
+	unsigned buf = 0;
+	for (uint64_t start_nonce = 0; ; start_nonce += c_search_batch_size)
+	{
+		// execute it!
+		//m_queue.enqueueNDRangeKernel(m_search_kernel, cl::NullRange, c_search_batch_size, m_workgroup_size);
+		ethash_search<<<c_search_batch_size, m_workgroup_size>>>((volatile uint*)m_hash_buf[buf],
+				(hash32_t const*)m_header, (hash128_t const*)m_dag, start_nonce, target, ~0U);
+
+		pending_batch_2 temp_pending_batch;
+		temp_pending_batch.start_nonce = start_nonce;
+		temp_pending_batch.buf = buf;
+
+		pending.push(temp_pending_batch);
+		buf = (buf + 1) % c_num_buffers;
+
+		// read results
+		if (pending.size() == c_num_buffers)
+		{
+			pending_batch_2 const& batch = pending.front();
+
+			// could use pinned host pointer instead
+			uint32_t* results = (uint32_t*)malloc((1+c_max_search_results) * sizeof(uint32_t));
+			cudaMemcpy( results, m_search_buf[batch.buf], (1+c_max_search_results) * sizeof(uint32_t), cudaMemcpyDeviceToHost );
+			//(uint32_t*)m_queue.enqueueMapBuffer(m_search_buf[batch.buf], true, CL_MAP_READ, 0, (1+c_max_search_results) * sizeof(uint32_t));
+			unsigned num_found = std::min(results[0], c_max_search_results);
+
+			uint64_t nonces[c_max_search_results];
+			for (unsigned i = 0; i != num_found; ++i)
+			{
+				nonces[i] = batch.start_nonce + results[i+1];
+			}
+
+			delete[] results;
+
+			//m_queue.enqueueUnmapMemObject(m_search_buf[batch.buf], results);
+
+			bool exit = num_found && hook.found(nonces, num_found);
+			exit |= hook.searched(batch.start_nonce, c_search_batch_size); // always report searched before exit
+			if (exit)
+				break;
+
+			// reset search buffer if we're still going
+			if (num_found)
+				cudaMemcpy(m_search_buf[batch.buf], c_zero, 4, cudaMemcpyHostToDevice);
+				//m_queue.enqueueWriteBuffer(m_search_buf[batch.buf], true, 0, 4, &c_zero);
+
+			pending.pop();
+		}
+	}
 }
 
