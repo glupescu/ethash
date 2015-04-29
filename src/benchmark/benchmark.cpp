@@ -26,11 +26,17 @@
 #include <libethash/ethash.h>
 #include <libethash/util.h>
 
+#undef OPENCL
 #define CUDA 1
 
 #ifdef CUDA
 #include <libethash-cuda/ethash_cuda_miner.h>
 #endif
+
+#ifdef OPENCL
+#include <libethash-cl/ethash_cl_miner.h>
+#endif
+
 #include <vector>
 #include <algorithm>
 
@@ -45,12 +51,10 @@
 #undef min
 #undef max
 
-#undef OPENCL
-
 using namespace std;
 using std::chrono::high_resolution_clock;
 
-#if defined(OPENCL)
+#if defined(OPENCL) || defined(CUDA)
 const unsigned trials = 1024*1024*32;
 #elif defined(FULL)
 const unsigned trials = 1024*1024/8;
@@ -113,12 +117,12 @@ extern "C" int main(void)
 {
 	// params for ethash
 	ethash_params params;
-	ethash_params_init(&params, 0);
+	//ethash_params_init(&params, 0);
 	//params.full_size = 262147 * 4096;	// 1GBish;
 	//params.full_size = 32771 * 4096;	// 128MBish;
-	//params.full_size = 8209 * 4096;	// 8MBish;
+	params.full_size = 8209 * 4096;	// 8MBish;
 	//params.cache_size = 8209*4096;
-	//params.cache_size = 2053*4096;
+	params.cache_size = 2053*4096;
 	ethash_h256_t seed;
 	ethash_h256_t previous_hash;
 
