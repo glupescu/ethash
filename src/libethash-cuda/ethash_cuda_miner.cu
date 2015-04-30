@@ -48,12 +48,12 @@
 /////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////
 
-#define THREADS_PER_HASH (128 / 16)
+#define THREADS_PER_HASH (2)
 #define HASHES_PER_LOOP (GROUP_SIZE / THREADS_PER_HASH)
 
 #define FNV_PRIME	0x01000193
 
-__constant__ uint2 Keccak_f1600_RC[24] = {
+__device__ __constant__ uint2 Keccak_f1600_RC[24] = {
 	{0x00000001, 0x00000000},
 	{0x00008082, 0x00000000},
 	{0x0000808a, 0x80000000},
@@ -99,14 +99,11 @@ inline __host__ __device__ uint2 operator^(uint2 a, uint2 b)
     return make_uint2(a.x ^ b.x, a.y ^ b.y);
 }
 
-inline __host__ __device__ void operator^=(uint2 a, uint2 b)
-{
-    a.x ^= b.x;
-    a.y ^= b.y;
-}
+#define __ENDIAN_LITTLE__ 1
 
 __device__ void keccak_f1600_round(uint2* a, uint r, uint out_size)
 {
+
 	#if !__ENDIAN_LITTLE__
 		for (uint i = 0; i != 25; ++i)
 			a[i] = make_uint2(a[i].y, a[i].x);
@@ -122,35 +119,35 @@ __device__ void keccak_f1600_round(uint2* a, uint r, uint out_size)
 	b[3] = a[3] ^ a[8] ^ a[13] ^ a[18] ^ a[23];
 	b[4] = a[4] ^ a[9] ^ a[14] ^ a[19] ^ a[24];
 	t = b[4] ^ make_uint2(b[1].x << 1 | b[1].y >> 31, b[1].y << 1 | b[1].x >> 31);
-	a[0] ^= t;
-	a[5] ^= t;
-	a[10] ^= t;
-	a[15] ^= t;
-	a[20] ^= t;
+	a[0] = a[0] ^ t;
+	a[5] = a[5] ^ t;
+	a[10] = a[10] ^ t;
+	a[15] = a[15] ^ t;
+	a[20] = a[20] ^ t;
 	t = b[0] ^ make_uint2(b[2].x << 1 | b[2].y >> 31, b[2].y << 1 | b[2].x >> 31);
-	a[1] ^= t;
-	a[6] ^= t;
-	a[11] ^= t;
-	a[16] ^= t;
-	a[21] ^= t;
+	a[1] = a[1] ^ t;
+	a[6] = a[6] ^ t;
+	a[11] = a[11] ^ t;
+	a[16] = a[16] ^ t;
+	a[21] = a[21] ^ t;
 	t = b[1] ^ make_uint2(b[3].x << 1 | b[3].y >> 31, b[3].y << 1 | b[3].x >> 31);
-	a[2] ^= t;
-	a[7] ^= t;
-	a[12] ^= t;
-	a[17] ^= t;
-	a[22] ^= t;
+	a[2] = a[2] ^ t;
+	a[7] = a[7] ^ t;
+	a[12] = a[12] ^ t;
+	a[17] = a[17] ^ t;
+	a[22] = a[22] ^ t;
 	t = b[2] ^ make_uint2(b[4].x << 1 | b[4].y >> 31, b[4].y << 1 | b[4].x >> 31);
-	a[3] ^= t;
-	a[8] ^= t;
-	a[13] ^= t;
-	a[18] ^= t;
-	a[23] ^= t;
+	a[3] = a[3] ^ t;
+	a[8] = a[8] ^ t;
+	a[13] = a[13] ^ t;
+	a[18] = a[18] ^ t;
+	a[23] = a[23] ^ t;
 	t = b[3] ^ make_uint2(b[0].x << 1 | b[0].y >> 31, b[0].y << 1 | b[0].x >> 31);
-	a[4] ^= t;
-	a[9] ^= t;
-	a[14] ^= t;
-	a[19] ^= t;
-	a[24] ^= t;
+	a[4] = a[4] ^ t;
+	a[9] = a[9] ^ t;
+	a[14] = a[14] ^ t;
+	a[19] = a[19] ^ t;
+	a[24] = a[24] ^ t;
 
 	// Rho Pi
 	b[0] = a[0];
@@ -211,9 +208,10 @@ __device__ void keccak_f1600_round(uint2* a, uint r, uint out_size)
 			a[24] = bitselect(b[24] ^ b[21], b[24], b[20]);
 		}
 	}
+	
 
 	// Iota
-	a[0] ^= Keccak_f1600_RC[r];
+	a[0] = a[0] ^ Keccak_f1600_RC[r];
 
 	#if !__ENDIAN_LITTLE__
 		for (uint i = 0; i != 25; ++i)
@@ -223,16 +221,18 @@ __device__ void keccak_f1600_round(uint2* a, uint r, uint out_size)
 
 __device__ void keccak_f1600_no_absorb(ulong* a, uint in_size, uint out_size, uint isolate)
 {
+	
 	for (uint i = in_size; i != 25; ++i)
 	{
 		a[i] = 0;
 	}
+
 #if __ENDIAN_LITTLE__
-	a[in_size] ^= 0x0000000000000001;
-	a[24-out_size*2] ^= 0x8000000000000000;
+	a[in_size] = a[in_size] ^ 0x0000000000000001;
+	a[24-out_size*2] = a[24-out_size*2] ^ 0x8000000000000000;
 #else
-	a[in_size] ^= 0x0100000000000000;
-	a[24-out_size*2] ^= 0x0000000000000080;
+	a[in_size] = a[in_size] ^ 0x0100000000000000;
+	a[24-out_size*2] = a[24-out_size*2] ^ 0x0000000000000080;
 #endif
 
 	// Originally I unrolled the first and last rounds to interface
@@ -394,15 +394,22 @@ __device__ hash32_t compute_hash(
 	)
 {
 	uint const gid = blockIdx.x * blockDim.x + threadIdx.x;
+	hash32_t mix;
+	hash64_t init;
 
 	// Compute one init hash per work item.
-	hash64_t init = init_hash(g_header, nonce, isolate);
+	init = init_hash(g_header, nonce, isolate);
+	
+/* check if Keccak works */
+#if 1
+	mix.uints[0] = 0;
+	return final_hash(&init, &mix, isolate);
+#endif	
 
 	// Threads work together in this phase in groups of 8.
 	uint const thread_id = gid % THREADS_PER_HASH;
 	uint const hash_id = (gid % GROUP_SIZE) / THREADS_PER_HASH;
 
-	hash32_t mix;
 	uint i = 0;
 	do
 	{
