@@ -25,8 +25,8 @@ public:
 private:
 	static unsigned const c_max_search_results = 63;
 	static unsigned const c_num_buffers = 2;
-	static unsigned const c_hash_batch_size = 128;
-	static unsigned const c_search_batch_size = 1024*256;
+	static unsigned const c_hash_batch_size = 512;
+	static unsigned const c_search_batch_size = 512*256;
 
 	ethash_params m_params;
 	char* m_dag;

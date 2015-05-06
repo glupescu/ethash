@@ -214,9 +214,9 @@ extern "C" int main(void)
 #endif
 
 #if defined(OPENCL) || defined(CUDA)
-	// validate 1024 hashes against CPU
-	miner.hash(g_hashes, (uint8_t*)&previous_hash, 0, 1024);
-	for (unsigned i = 0; i != 1024; ++i)
+	// validate 256 hashes against CPU
+	miner.hash(g_hashes, (uint8_t*)&previous_hash, 0, 256);
+	for (unsigned i = 0; i != 256; ++i)
 	{
 		ethash_return_value hash;
 		ethash_light(&hash, &cache, &params, &previous_hash, i);
