@@ -126,24 +126,6 @@ extern "C" int main(void)
 	ethash_h256_t seed;
 	ethash_h256_t previous_hash;
 
-#ifdef OPENCL
-	cout << "OPENCL defined" << endl;
-#endif
-
-#ifdef CUDA
-	cout << "CUDA defined" << endl;
-#endif
-
-#ifdef FULL
-	cout << "FULL defined" << endl;
-#endif
-
-#if defined(OPENCL) || defined(CUDA) || defined (FULL)
-	cout << "OPENCL || CUDA || FULL defined" << endl;
-#else
-	cout << "nothing actually defined" << endl;
-#endif
-
 	memcpy(&seed, hexStringToBytes("9410b944535a83d9adf6bbdcc80e051f30676173c16ca0d32d6f1263fc246466").data(), 32);
 	memcpy(&previous_hash, hexStringToBytes("c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470").data(), 32);
 
@@ -214,9 +196,9 @@ extern "C" int main(void)
 #endif
 
 #if defined(OPENCL) || defined(CUDA)
-	// validate 256 hashes against CPU
-	miner.hash(g_hashes, (uint8_t*)&previous_hash, 0, 256);
-	for (unsigned i = 0; i != 256; ++i)
+	// validate 512 hashes against CPU
+	miner.hash(g_hashes, (uint8_t*)&previous_hash, 0, 512);
+	for (unsigned i = 0; i != 512; ++i)
 	{
 		ethash_return_value hash;
 		ethash_light(&hash, &cache, &params, &previous_hash, i);

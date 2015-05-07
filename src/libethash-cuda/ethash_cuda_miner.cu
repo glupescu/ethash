@@ -14,11 +14,12 @@
   You should have received a copy of the GNU General Public License
   along with cpp-ethereum.  If not, see <http://www.gnu.org/licenses/>.
 */
-/** @file ethash_cuda_miner.cpp
+/** 
 * @author Tim Hughes <tim@twistedfury.com>
 * @date 2015
+*
+* CUDA port by Grigore Lupescu <grigore.lupescu@gmail.com>
 */
-
 
 #define _CRT_SECURE_NO_WARNINGS
 
@@ -40,13 +41,14 @@
 #undef min
 #undef max
 
-// TODO
 #define DAG_SIZE 262688
 #define MAX_OUTPUTS 63
 #define GROUP_SIZE 64
 #define ACCESSES 64
-/////////////////////////////////////////////////////////////////////////////////
-/////////////////////////////////////////////////////////////////////////////////
+
+/* APPLICATION SETTINGS */
+#define __USE_SHARED_MEMORY__	1
+#define __ENDIAN_LITTLE__	1
 
 #define THREADS_PER_HASH (8)
 #define HASHES_PER_LOOP (GROUP_SIZE / THREADS_PER_HASH)
@@ -99,11 +101,15 @@ inline __host__ __device__ uint2 operator^(uint2 a, uint2 b)
     return make_uint2(a.x ^ b.x, a.y ^ b.y);
 }
 
-#define __ENDIAN_LITTLE__ 1
+/*----------------------------------------------------------------------
+*	HOST/TARGET FUNCTIONS
+*---------------------------------------------------------------------*/
 
+/******************************************
+* FUNCTION: keccak_f1600_round
+*******************************************/
 __device__ void keccak_f1600_round(uint2* a, uint r, uint out_size)
 {
-
 	#if !__ENDIAN_LITTLE__
 		for (uint i = 0; i != 25; ++i)
 			a[i] = make_uint2(a[i].y, a[i].x);
@@ -219,6 +225,9 @@ __device__ void keccak_f1600_round(uint2* a, uint r, uint out_size)
 	#endif
 }
 
+/******************************************
+* FUNCTION: keccak_f1600_no_absorb
+*******************************************/
 __device__ void keccak_f1600_no_absorb(ulong* a, uint in_size, uint out_size, uint isolate)
 {
 	
@@ -303,6 +312,9 @@ typedef union
 	uint4 uint4s[128 / sizeof(uint4)];
 } hash128_t;
 
+/******************************************
+* FUNCTION: init_hash
+*******************************************/
 __device__ hash64_t init_hash( hash32_t const* header, ulong nonce, uint isolate)
 {
 	hash64_t init;
@@ -319,6 +331,9 @@ __device__ hash64_t init_hash( hash32_t const* header, ulong nonce, uint isolate
 	return init;
 }
 
+/******************************************
+* FUNCTION: inner_loop
+*******************************************/
 __device__ uint inner_loop(uint4 init, uint thread_id, uint* share, hash128_t const* g_dag, uint isolate)
 {
 	uint4 mix = init;
@@ -355,6 +370,9 @@ __device__ uint inner_loop(uint4 init, uint thread_id, uint* share, hash128_t co
 	return fnv_reduce(mix);
 }
 
+/******************************************
+* FUNCTION: final_hash
+*******************************************/
 __device__ hash32_t final_hash(hash64_t const* init, hash32_t const* mix, uint isolate)
 {
 	ulong state[25];
@@ -385,6 +403,10 @@ typedef union
 	hash32_t mix;
 } compute_hash_share;
 
+/******************************************
+* FUNCTION: compute_hash_simple
+* INFO: shared memory optimisations
+*******************************************/
 __device__ hash32_t compute_hash(
 	compute_hash_share* share,
 	hash32_t const* g_header,
@@ -416,22 +438,18 @@ __device__ hash32_t compute_hash(
 		// share init with other threads
 		if (i == thread_id)
 			share[hash_id].init = init;
-		__syncthreads();
 		__threadfence_block();
 
 		uint4 thread_init = share[hash_id].init.uint4s[thread_id % (64 / sizeof(uint4))];
-		__syncthreads();
 		__threadfence_block();
 
 		uint thread_mix = inner_loop(thread_init, thread_id, share[hash_id].mix.uints, g_dag, isolate);
 
 		share[hash_id].mix.uints[thread_id] = thread_mix;
-		__syncthreads();
 		__threadfence_block();
 
 		if (i == thread_id)
 			mix = share[hash_id].mix;
-		__syncthreads();
 		__threadfence_block();
 	}
 	while (++i != (THREADS_PER_HASH & isolate));
@@ -439,6 +457,10 @@ __device__ hash32_t compute_hash(
 	return final_hash(&init, &mix, isolate);
 }
 
+/******************************************
+* FUNCTION: compute_hash_simple
+* INFO: no optimisations
+*******************************************/
 __device__ hash32_t compute_hash_simple(
 	hash32_t const* g_header,
 	hash128_t const* g_dag,
@@ -480,9 +502,9 @@ __device__ hash32_t compute_hash_simple(
 	return final_hash(&init, &fnv_mix, isolate);
 }
 
-
-
-
+/******************************************
+* FUNCTION: ethash_hash
+*******************************************/
 __global__ void ethash_hash(
 	hash32_t* g_hashes,
 	hash32_t const* g_header,
@@ -492,7 +514,7 @@ __global__ void ethash_hash(
 	)
 {
 
-#if 1
+#if __USE_SHARED_MEMORY__
 	__shared__ compute_hash_share share[HASHES_PER_LOOP];
 
 	uint const gid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -503,12 +525,38 @@ __global__ void ethash_hash(
 #endif
 }
 
+/******************************************
+* FUNCTION: ethash_search
+*******************************************/
+__global__ void ethash_search(
+	uint* g_output,
+	 hash32_t const* g_header,
+	hash128_t const* g_dag,
+	ulong start_nonce,
+	ulong target,
+	uint isolate
+	)
+{
+#if __USE_SHARED_MEMORY__
+	__shared__ compute_hash_share share[HASHES_PER_LOOP];
 
+	uint const gid = (blockIdx.x + gridDim.x  * blockIdx.y) * blockDim.x + threadIdx.x + blockDim.x * threadIdx.y;
+	hash32_t hash = compute_hash(share, g_header, g_dag, start_nonce + gid, isolate);
+#else
+	uint const gid = (blockIdx.x + gridDim.x  * blockIdx.y) * blockDim.x + threadIdx.x + blockDim.x * threadIdx.y;
+	hash32_t hash = compute_hash(share, g_header, g_dag, start_nonce + gid, isolate);
+#endif
 
+	if (hash.ulongs[countof(hash.ulongs)-1] < target)
+	{
+		uint slot = min(MAX_OUTPUTS, atomicInc(&g_output[0], 1) + 1);
+		g_output[slot] = gid;
+	}
+}
 
-/////////////////////////////////////////////////////////////////////////////////
-/////////////////////////////////////////////////////////////////////////////////
-
+/*----------------------------------------------------------------------
+*	HOST ONLY FUNCTIONS
+*---------------------------------------------------------------------*/
 ethash_cuda_miner::ethash_cuda_miner()
 {
 }
@@ -517,6 +565,9 @@ void ethash_cuda_miner::finish()
 {
 }
 
+/******************************************
+* FUNCTION: init
+*******************************************/
 bool ethash_cuda_miner::init(ethash_params const& params, ethash_h256_t const *seed, unsigned workgroup_size)
 {
 	// store params
@@ -537,7 +588,6 @@ bool ethash_cuda_miner::init(ethash_params const& params, ethash_h256_t const *s
 		ethash_cache cache;
 		cache.mem = (void*)(((uintptr_t)cache_mem + 63) & ~63);
 		ethash_mkcache(&cache, &m_params, seed);
-		printf("CACHE built\n");
 
 		// if this throws then it's because we probably need to subdivide the dag uploads for compatibility
 		char* dag_ptr = (char*) malloc(m_params.full_size);
@@ -559,7 +609,9 @@ bool ethash_cuda_miner::init(ethash_params const& params, ethash_h256_t const *s
 	return true;
 }
 
-
+/******************************************
+* FUNCTION: hash
+*******************************************/
 struct pending_batch
 {
 	unsigned base;
@@ -569,9 +621,7 @@ struct pending_batch
 
 void ethash_cuda_miner::hash(uint8_t* ret, uint8_t const* header, uint64_t nonce, unsigned count)
 {
-
 	std::queue<pending_batch> pending;
-	printf("count=%d c_hash_batch_size=%d m_workgroup_size=%d\n", count, c_hash_batch_size, m_workgroup_size);
 
 	cudaMemcpy( m_header, header, 32, cudaMemcpyHostToDevice);
 
@@ -590,8 +640,6 @@ void ethash_cuda_miner::hash(uint8_t* ret, uint8_t const* header, uint64_t nonce
 			temp_pending_batch.buf = buf;
 
 			// execute it!
-			printf("batch_count=%u m_workgroup_size=%u\n", batch_count, m_workgroup_size);
-
 			ethash_hash<<<batch_count, m_workgroup_size>>>((hash32_t*)m_hash_buf[buf],
 					(const hash32_t*)m_header, (const hash128_t*)m_dag, nonce, ~0U);
 
@@ -605,10 +653,7 @@ void ethash_cuda_miner::hash(uint8_t* ret, uint8_t const* header, uint64_t nonce
 		{
 			pending_batch const& batch = pending.front();
 
-			printf("batch.buf=%d batch.count=%d\n", batch.buf, batch.count);
-
 			// could use pinned host pointer instead, but this path isn't that important.
-			//cudaMemcpy(ret + batch.base*ETHASH_BYTES, m_hash_buf[batch.buf], batch.count*ETHASH_BYTES, cudaMemcpyDeviceToHost );
 			cudaMemcpy(ret + batch.base*ETHASH_BYTES, m_hash_buf[batch.buf], batch.count*ETHASH_BYTES, cudaMemcpyDeviceToHost );
 
 			pending.pop();
@@ -616,30 +661,10 @@ void ethash_cuda_miner::hash(uint8_t* ret, uint8_t const* header, uint64_t nonce
 	}
 }
 
-__global__ void ethash_search(
-	volatile uint* restrict g_output,
-	 hash32_t const* g_header,
-	hash128_t const* g_dag,
-	ulong start_nonce,
-	ulong target,
-	uint isolate
-	)
-{
-	compute_hash_share share[HASHES_PER_LOOP];
-
-	uint const gid = blockIdx.x * blockDim.x + threadIdx.x;
-	hash32_t hash = compute_hash(share, g_header, g_dag, start_nonce + gid, isolate);
-
-	if (hash.ulongs[countof(hash.ulongs)-1] < target)
-	{
-		// TODO
-		//uint slot = min(MAX_OUTPUTS, atomic_inc(&g_output[0]) + 1);
-		uint slot = 0;
-		g_output[slot] = gid;
-	}
-}
-
-struct pending_batch_2
+/******************************************
+* FUNCTION: search
+*******************************************/
+struct pending_batch_search
 {
 	uint64_t start_nonce;
 	unsigned buf;
@@ -647,71 +672,62 @@ struct pending_batch_2
 
 void ethash_cuda_miner::search(uint8_t const* header, uint64_t target, search_hook& hook)
 {
-	std::queue<pending_batch_2> pending;
+	std::queue<pending_batch_search> pending;
 	static uint32_t const c_zero = 0;
+	uint32_t* results = (uint32_t*)malloc((1+c_max_search_results) * sizeof(uint32_t));
 
 	// update header constant buffer
-	//m_queue.enqueueWriteBuffer(m_header, false, 0, 32, header);
 	cudaMemcpy(m_header, header, 32, cudaMemcpyHostToDevice);
 
 	for (unsigned i = 0; i != c_num_buffers; ++i)
-	{
-		//m_queue.enqueueWriteBuffer(m_search_buf[i], false, 0, 4, &c_zero);
-		cudaMemcpy( m_search_buf[i], c_zero, 4, cudaMemcpyHostToDevice);
-	}
-
-	{
-		//m_queue.finish();
-	}
-
+		cudaMemcpy( m_search_buf[i], &c_zero, 4, cudaMemcpyHostToDevice);
+ 
 	unsigned buf = 0;
 	for (uint64_t start_nonce = 0; ; start_nonce += c_search_batch_size)
 	{
 		// execute it!
-		//m_queue.enqueueNDRangeKernel(m_search_kernel, cl::NullRange, c_search_batch_size, m_workgroup_size);
-		ethash_search<<<c_search_batch_size, m_workgroup_size>>>((volatile uint*)m_hash_buf[buf],
+		dim3 dimGrid(512, c_search_batch_size/512, 1);
+		ethash_search<<<dimGrid, m_workgroup_size>>>((uint*)m_search_buf[buf],
 				(hash32_t const*)m_header, (hash128_t const*)m_dag, start_nonce, target, ~0U);
 
-		pending_batch_2 temp_pending_batch;
+		pending_batch_search temp_pending_batch;
 		temp_pending_batch.start_nonce = start_nonce;
 		temp_pending_batch.buf = buf;
 
 		pending.push(temp_pending_batch);
 		buf = (buf + 1) % c_num_buffers;
-
+		
 		// read results
 		if (pending.size() == c_num_buffers)
 		{
-			pending_batch_2 const& batch = pending.front();
+			pending_batch_search const& batch = pending.front();
 
 			// could use pinned host pointer instead
-			uint32_t* results = (uint32_t*)malloc((1+c_max_search_results) * sizeof(uint32_t));
 			cudaMemcpy( results, m_search_buf[batch.buf], (1+c_max_search_results) * sizeof(uint32_t), cudaMemcpyDeviceToHost );
-			//(uint32_t*)m_queue.enqueueMapBuffer(m_search_buf[batch.buf], true, CL_MAP_READ, 0, (1+c_max_search_results) * sizeof(uint32_t));
+			
 			unsigned num_found = std::min(results[0], c_max_search_results);
 
 			uint64_t nonces[c_max_search_results];
 			for (unsigned i = 0; i != num_found; ++i)
-			{
 				nonces[i] = batch.start_nonce + results[i+1];
-			}
-
-			delete[] results;
-
-			//m_queue.enqueueUnmapMemObject(m_search_buf[batch.buf], results);
 
 			bool exit = num_found && hook.found(nonces, num_found);
 			exit |= hook.searched(batch.start_nonce, c_search_batch_size); // always report searched before exit
 			if (exit)
 				break;
+				
+			// end search prematurely due to poor performance
+			if(start_nonce == 524288)
+				break;
 
 			// reset search buffer if we're still going
 			if (num_found)
-				cudaMemcpy(m_search_buf[batch.buf], c_zero, 4, cudaMemcpyHostToDevice);
-				//m_queue.enqueueWriteBuffer(m_search_buf[batch.buf], true, 0, 4, &c_zero);
+				cudaMemcpy(m_search_buf[batch.buf], &c_zero, 4, cudaMemcpyHostToDevice);
 
 			pending.pop();
 		}
 	}
+	
+	delete[] results;
 }
 
