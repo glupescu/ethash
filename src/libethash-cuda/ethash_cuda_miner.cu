@@ -54,7 +54,7 @@
 
 #define FNV_PRIME	0x01000193
 
-__device__ __constant__ uint2 Keccak_f1600_RC[24] = {
+__constant__ uint2 Keccak_f1600_RC[24] = {
 	{0x00000001, 0x00000000},
 	{0x00008082, 0x00000000},
 	{0x0000808a, 0x80000000},
@@ -109,7 +109,7 @@ void keccak_f1600_round(uint2* a, uint r, uint out_size)
 /******************************************
 * FUNCTION: keccak_f1600_no_absorb
 *******************************************/
-__device__ void keccak_f1600_no_absorb(ulong* a, uint in_size, uint out_size, uint isolate)
+void keccak_f1600_no_absorb(ulong* a, uint in_size, uint out_size, uint isolate)
 {
 	
 	for (uint i = in_size; i != 25; ++i)
@@ -155,12 +155,12 @@ __device__ void keccak_f1600_no_absorb(ulong* a, uint in_size, uint out_size, ui
 
 #define countof(x) (sizeof(x) / sizeof(x[0]))
 
-__device__ uint fnv(uint x, uint y)
+uint fnv(uint x, uint y)
 {
 	return x * FNV_PRIME ^ y;
 }
 
-__device__ uint4 fnv4(uint4 a, uint4 b)
+uint4 fnv4(uint4 a, uint4 b)
 {
 	uint4 res;
 
@@ -172,7 +172,7 @@ __device__ uint4 fnv4(uint4 a, uint4 b)
 	return res;
 }
 
-__device__ uint fnv_reduce(uint4 v)
+uint fnv_reduce(uint4 v)
 {
 	return fnv(fnv(fnv(v.x, v.y), v.z), v.w);
 }
@@ -198,7 +198,7 @@ typedef union
 /******************************************
 * FUNCTION: init_hash
 *******************************************/
-__device__ hash64_t init_hash( hash32_t const* header, ulong nonce, uint isolate)
+hash64_t init_hash( hash32_t const* header, ulong nonce, uint isolate)
 {
 	hash64_t init;
 	uint const init_size = countof(init.ulongs);
@@ -217,7 +217,7 @@ __device__ hash64_t init_hash( hash32_t const* header, ulong nonce, uint isolate
 /******************************************
 * FUNCTION: inner_loop
 *******************************************/
-__device__ uint inner_loop(uint4 init, uint thread_id, uint* share, hash128_t const* g_dag, uint isolate)
+uint inner_loop(uint4 init, uint thread_id, uint* share, hash128_t const* g_dag, uint isolate)
 {
 	uint4 mix = init;
 
@@ -225,8 +225,8 @@ __device__ uint inner_loop(uint4 init, uint thread_id, uint* share, hash128_t co
 	if (thread_id == 0)
 		*share = mix.x;
 
-	__syncthreads();
-	__threadfence_block();
+	/*** TODO - ASCHW4: uncomment when function qualifiers are OK!! */
+	//__syncthreads();
 	uint init0 = *share;
 
 	uint a = 0;
@@ -242,8 +242,8 @@ __device__ uint inner_loop(uint4 init, uint thread_id, uint* share, hash128_t co
 				uint m[4] = { mix.x, mix.y, mix.z, mix.w };
 				*share = fnv(init0 ^ (a+i), m[i]) % DAG_SIZE;
 			}
-			__syncthreads();
-			__threadfence_block();
+			/*** TODO - ASCHW4: uncomment when function qualifiers are OK!! */
+			//__syncthreads();
 
 			mix = fnv4(mix, g_dag[*share].uint4s[thread_id]);
 		}
@@ -256,7 +256,7 @@ __device__ uint inner_loop(uint4 init, uint thread_id, uint* share, hash128_t co
 /******************************************
 * FUNCTION: final_hash
 *******************************************/
-__device__ hash32_t final_hash(hash64_t const* init, hash32_t const* mix, uint isolate)
+hash32_t final_hash(hash64_t const* init, hash32_t const* mix, uint isolate)
 {
 	ulong state[25];
 
@@ -290,7 +290,7 @@ typedef union
 * FUNCTION: compute_hash_simple
 * INFO: no optimisations
 *******************************************/
-__device__ hash32_t compute_hash_simple(
+hash32_t compute_hash_simple(
 	hash32_t const* g_header,
 	hash128_t const* g_dag,
 	ulong nonce,
@@ -334,7 +334,7 @@ __device__ hash32_t compute_hash_simple(
 /******************************************
 * FUNCTION: ethash_hash
 *******************************************/
-__global__ void ethash_hash(
+void ethash_hash(
 	hash32_t* g_hashes,
 	hash32_t const* g_header,
 	hash128_t const* g_dag,
@@ -342,14 +342,16 @@ __global__ void ethash_hash(
 	uint isolate
 	)
 {
-	uint const gid = blockIdx.x * blockDim.x + threadIdx.x;
+	/*** TODO - ASCHW4: compute global thread id from blockIdx, blockDim and threadIdx*/
+	uint const gid = 0;
+	
 	g_hashes[gid] = compute_hash_simple(g_header, g_dag, start_nonce + gid, isolate);
 }
 
 /******************************************
 * FUNCTION: ethash_search
 *******************************************/
-__global__ void ethash_search(
+void ethash_search(
 	uint* g_output,
 	 hash32_t const* g_header,
 	hash128_t const* g_dag,
@@ -358,12 +360,16 @@ __global__ void ethash_search(
 	uint isolate
 	)
 {
-	uint const gid = (blockIdx.x + gridDim.x  * blockIdx.y) * blockDim.x + threadIdx.x + blockDim.x * threadIdx.y;
+	/*** TODO - ASCHW4: compute global thread id from blockIdx, blockDim and threadIdx*/
+	uint const gid = 0;
+	
 	hash32_t hash = compute_hash_simple(g_header, g_dag, start_nonce + gid, isolate);
 
 	if (hash.ulongs[countof(hash.ulongs)-1] < target)
 	{
-		uint slot = min(MAX_OUTPUTS, atomicInc(&g_output[0], 1) + 1);
+		/*** TODO - ASCHW4: use atomicInc when function qualifiers are OK !!! */
+		//uint slot = min(MAX_OUTPUTS, atomicInc(&g_output[0], 1) + 1);
+		uint slot = min(MAX_OUTPUTS, (++g_output[0]) + 1);
 		g_output[slot] = gid;
 	}
 }
@@ -454,8 +460,9 @@ void ethash_cuda_miner::hash(uint8_t* ret, uint8_t const* header, uint64_t nonce
 			temp_pending_batch.buf = buf;
 
 			// execute it!
-			ethash_hash<<<batch_count, m_workgroup_size>>>((hash32_t*)m_hash_buf[buf],
-					(const hash32_t*)m_header, (const hash128_t*)m_dag, nonce, ~0U);
+			/*** TODO - ASCHW4: call to ethash_hash */
+			/* EXEC batch_count instances, 
+			* ARGS to pass: m_hash_buf[buf], m_header, m_dag, nonce, ~0U */
 
 			pending.push(temp_pending_batch);
 			i += this_count;
@@ -499,10 +506,9 @@ void ethash_cuda_miner::search(uint8_t const* header, uint64_t target, search_ho
 	unsigned buf = 0;
 	for (uint64_t start_nonce = 0; ; start_nonce += c_search_batch_size)
 	{
-		// execute it!
-		dim3 dimGrid(512, c_search_batch_size/512, 1);
-		ethash_search<<<dimGrid, m_workgroup_size>>>((uint*)m_search_buf[buf],
-				(hash32_t const*)m_header, (hash128_t const*)m_dag, start_nonce, target, ~0U);
+		/*** TODO - ASCHW4: call to ethash_search */
+		/* EXEC c_search_batch_size instances, 
+		* ARGS to pass: m_search_buf[buf], m_header, m_dag, start_nonce, target, ~0U */
 
 		pending_batch_search temp_pending_batch;
 		temp_pending_batch.start_nonce = start_nonce;
