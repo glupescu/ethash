@@ -5,15 +5,15 @@ set(CMAKE_CXX_COMPILER /opt/tools/compilers/gnu/4.7.0/bin/g++)
 
 project(ethash)
 
-set(CRYPTOPP_INCLUDE_DIR /export/home/fils/stud/g/grigore.lupescu/ethereum-wp/cryptopp CACHE FILEPATH "" FORCE)
-set(CRYPTOPP_ROOT_DIR /export/home/fils/stud/g/grigore.lupescu/ethereum-wp/cryptopp CACHE FILEPATH "" FORCE)
+set(CRYPTOPP_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/cryptopp/ CACHE FILEPATH "" FORCE)
+set(CRYPTOPP_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/cryptopp/ CACHE FILEPATH "" FORCE)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/modules/")
 set(ETHHASH_LIBS ethash)
 
 include_directories(/opt/tools/libraries/cuda-6.0/include/)
-include_directories(/export/home/fils/stud/g/grigore.lupescu/ethereum-wp/cryptopp/)
-include_directories(/export/home/fils/stud/g/grigore.lupescu/ethereum-wp/)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/cryptopp)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/)
 
 if (WIN32 AND WANT_CRYPTOPP)
 	add_subdirectory(cryptopp)
