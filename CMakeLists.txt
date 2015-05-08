@@ -20,17 +20,9 @@ if (WIN32 AND WANT_CRYPTOPP)
 endif()
 
 add_subdirectory(src/libethash)
-# bin2h.cmake doesn't work
-if (NOT OpenCL_FOUND)
-	find_package(OpenCL)
-endif()
 
 if (NOT CUDA_FOUND)
 	find_package(CUDA)
-endif()
-
-if (OpenCL_FOUND)
-	add_subdirectory(src/libethash-cl)
 endif()
 
 if (CUDA_FOUND)

@@ -33,10 +33,6 @@
 #include <libethash-cuda/ethash_cuda_miner.h>
 #endif
 
-#ifdef OPENCL
-#include <libethash-cl/ethash_cl_miner.h>
-#endif
-
 #include <vector>
 #include <algorithm>
 
@@ -167,15 +163,11 @@ extern "C" int main(void)
 		#endif // FULL
 	}
 
-#ifdef OPENCL
-	ethash_cl_miner miner;
-#endif
-
 #ifdef CUDA
 	ethash_cuda_miner miner;
 #endif
 
-#if defined(OPENCL) || defined(CUDA)
+#if defined(CUDA)
 	{
 		auto startTime = high_resolution_clock::now();
 		if (!miner.init(params, &seed))
@@ -195,7 +187,7 @@ extern "C" int main(void)
 	}
 #endif
 
-#if defined(OPENCL) || defined(CUDA)
+#if defined(CUDA)
 	// validate 512 hashes against CPU
 	miner.hash(g_hashes, (uint8_t*)&previous_hash, 0, 512);
 	for (unsigned i = 0; i != 512; ++i)
@@ -220,7 +212,7 @@ extern "C" int main(void)
 	auto startTime = high_resolution_clock::now();
 	unsigned hash_count = trials;
 
-#if defined(OPENCL) || defined(CUDA)
+#if defined(CUDA)
 	{
 		struct search_hook : ethash_cuda_miner::search_hook
 		{
@@ -273,7 +265,7 @@ extern "C" int main(void)
 	debugf("Search took: %ums\n", (unsigned)time/1000);
 
 	unsigned read_size = ACCESSES * MIX_BYTES;
-#if defined(OPENCL) || defined(CUDA) || defined(FULL)
+#if defined(CUDA) || defined(FULL)
 	debugf(
 		"hashrate: %8.2f Mh/s, bw: %8.2f GB/s\n",
 		(double)hash_count * (1000*1000)/time / (1000*1000),
