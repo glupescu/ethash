@@ -47,7 +47,6 @@
 #define ACCESSES 64
 
 /* APPLICATION SETTINGS */
-#define __USE_SHARED_MEMORY__	1
 #define __ENDIAN_LITTLE__	1
 
 #define THREADS_PER_HASH (8)
@@ -405,60 +404,6 @@ typedef union
 
 /******************************************
 * FUNCTION: compute_hash_simple
-* INFO: shared memory optimisations
-*******************************************/
-__device__ hash32_t compute_hash(
-	compute_hash_share* share,
-	hash32_t const* g_header,
-	hash128_t const* g_dag,
-	ulong nonce,
-	uint isolate
-	)
-{
-	uint const gid = blockIdx.x * blockDim.x + threadIdx.x;
-	hash32_t mix;
-	hash64_t init;
-
-	// Compute one init hash per work item.
-	init = init_hash(g_header, nonce, isolate);
-	
-/* check if Keccak works */
-#if 0
-	mix.uints[0] = 0;
-	return final_hash(&init, &mix, isolate);
-#endif	
-
-	// Threads work together in this phase in groups of 8.
-	uint const thread_id = gid % THREADS_PER_HASH;
-	uint const hash_id = (gid % GROUP_SIZE) / THREADS_PER_HASH;
-
-	uint i = 0;
-	do
-	{
-		// share init with other threads
-		if (i == thread_id)
-			share[hash_id].init = init;
-		__threadfence_block();
-
-		uint4 thread_init = share[hash_id].init.uint4s[thread_id % (64 / sizeof(uint4))];
-		__threadfence_block();
-
-		uint thread_mix = inner_loop(thread_init, thread_id, share[hash_id].mix.uints, g_dag, isolate);
-
-		share[hash_id].mix.uints[thread_id] = thread_mix;
-		__threadfence_block();
-
-		if (i == thread_id)
-			mix = share[hash_id].mix;
-		__threadfence_block();
-	}
-	while (++i != (THREADS_PER_HASH & isolate));
-
-	return final_hash(&init, &mix, isolate);
-}
-
-/******************************************
-* FUNCTION: compute_hash_simple
 * INFO: no optimisations
 *******************************************/
 __device__ hash32_t compute_hash_simple(
@@ -513,16 +458,8 @@ __global__ void ethash_hash(
 	uint isolate
 	)
 {
-
-#if __USE_SHARED_MEMORY__
-	__shared__ compute_hash_share share[HASHES_PER_LOOP];
-
-	uint const gid = blockIdx.x * blockDim.x + threadIdx.x;
-	g_hashes[gid] = compute_hash(share, g_header, g_dag, start_nonce + gid, isolate);
-#else
 	uint const gid = blockIdx.x * blockDim.x + threadIdx.x;
 	g_hashes[gid] = compute_hash_simple(g_header, g_dag, start_nonce + gid, isolate);
-#endif
 }
 
 /******************************************
@@ -537,15 +474,8 @@ __global__ void ethash_search(
 	uint isolate
 	)
 {
-#if __USE_SHARED_MEMORY__
-	__shared__ compute_hash_share share[HASHES_PER_LOOP];
-
 	uint const gid = (blockIdx.x + gridDim.x  * blockIdx.y) * blockDim.x + threadIdx.x + blockDim.x * threadIdx.y;
-	hash32_t hash = compute_hash(share, g_header, g_dag, start_nonce + gid, isolate);
-#else
-	uint const gid = (blockIdx.x + gridDim.x  * blockIdx.y) * blockDim.x + threadIdx.x + blockDim.x * threadIdx.y;
-	hash32_t hash = compute_hash(share, g_header, g_dag, start_nonce + gid, isolate);
-#endif
+	hash32_t hash = compute_hash_simple(g_header, g_dag, start_nonce + gid, isolate);
 
 	if (hash.ulongs[countof(hash.ulongs)-1] < target)
 	{
