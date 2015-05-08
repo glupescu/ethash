@@ -397,10 +397,10 @@ bool ethash_cuda_miner::init(ethash_params const& params, ethash_h256_t const *s
 	m_workgroup_size = ((workgroup_size + 7) / 8) * 8;
 
 	// create buffer for dag
-	cudaMalloc(&m_dag, m_params.full_size);
+	/*** TODO - ASCHW4: Allocate using cudaMalloc for m_dag, size m_params.full_size */
 
 	// create buffer for header
-	cudaMalloc(&m_header, 32);
+	/*** TODO - ASCHW4: Allocate using cudaMalloc for m_header, size 32 */
 
 	// compute dag on CPU
 	{
@@ -413,8 +413,8 @@ bool ethash_cuda_miner::init(ethash_params const& params, ethash_h256_t const *s
 		char* dag_ptr = (char*) malloc(m_params.full_size);
 		ethash_compute_full_data(dag_ptr, &m_params, &cache);
 
-		cudaMemcpy( m_dag, dag_ptr, m_params.full_size, cudaMemcpyHostToDevice);
-
+		/*** TODO - ASCHW4: Copy memory RAM->VRAM, SRC:dag_ptr, DST:m_dag, SIZE:m_params.full_size */
+		
 		delete[] dag_ptr;
 
 		free(cache_mem);
@@ -423,8 +423,9 @@ bool ethash_cuda_miner::init(ethash_params const& params, ethash_h256_t const *s
 	// create mining buffers
 	for (unsigned i = 0; i != c_num_buffers; ++i)
 	{
-		cudaMalloc(&m_hash_buf[i], 32*c_hash_batch_size);
-		cudaMalloc(&m_search_buf[i], (c_max_search_results + 1) * sizeof(uint32_t));
+		/*** TODO - ASCHW4: Allocate memory on device/VRAM
+		* m_hash_buf[i], SIZE: 32*c_hash_batch_size
+		* m_search_buf[i], SIZE: (c_max_search_results + 1) * sizeof(uint32_t) */
 	}
 	return true;
 }
@@ -443,7 +444,7 @@ void ethash_cuda_miner::hash(uint8_t* ret, uint8_t const* header, uint64_t nonce
 {
 	std::queue<pending_batch> pending;
 
-	cudaMemcpy( m_header, header, 32, cudaMemcpyHostToDevice);
+	/*** TODO - ASCHW4: Copy memory RAM->VRAM, SRC:header, DST:m_header, SIZE:32 */
 
 	unsigned buf = 0;
 	for (unsigned i = 0; i < count || !pending.empty(); )
@@ -475,7 +476,8 @@ void ethash_cuda_miner::hash(uint8_t* ret, uint8_t const* header, uint64_t nonce
 			pending_batch const& batch = pending.front();
 
 			// could use pinned host pointer instead, but this path isn't that important.
-			cudaMemcpy(ret + batch.base*ETHASH_BYTES, m_hash_buf[batch.buf], batch.count*ETHASH_BYTES, cudaMemcpyDeviceToHost );
+			/*** TODO - ASCHW4: Copy memory VRAM->RAM, SRC:m_hash_buf[batch.buf], 
+			* DST:ret + batch.base*ETHASH_BYTES, SIZE:batch.count*ETHASH_BYTES */
 
 			pending.pop();
 		}
@@ -498,7 +500,7 @@ void ethash_cuda_miner::search(uint8_t const* header, uint64_t target, search_ho
 	uint32_t* results = (uint32_t*)malloc((1+c_max_search_results) * sizeof(uint32_t));
 
 	// update header constant buffer
-	cudaMemcpy(m_header, header, 32, cudaMemcpyHostToDevice);
+	/*** TODO - ASCHW4: Copy memory RAM->VRAM, SRC:header, DST:m_header, SIZE:32 */
 
 	for (unsigned i = 0; i != c_num_buffers; ++i)
 		cudaMemcpy( m_search_buf[i], &c_zero, 4, cudaMemcpyHostToDevice);
@@ -523,7 +525,8 @@ void ethash_cuda_miner::search(uint8_t const* header, uint64_t target, search_ho
 			pending_batch_search const& batch = pending.front();
 
 			// could use pinned host pointer instead
-			cudaMemcpy( results, m_search_buf[batch.buf], (1+c_max_search_results) * sizeof(uint32_t), cudaMemcpyDeviceToHost );
+			/*** TODO - ASCHW4: Copy memory VRAM->RAM, SRC:m_search_buf[batch.buf], 
+			* DST:results, SIZE:(1+c_max_search_results) * sizeof(uint32_t) */
 			
 			unsigned num_found = std::min(results[0], c_max_search_results);
 
