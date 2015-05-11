@@ -3,8 +3,6 @@ cmake_minimum_required(VERSION 2.8)
 set(LIBRARY ethash-cuda)
 set(CMAKE_BUILD_TYPE Release)
 
-include_directories(/export/home/fils/stud/g/grigore.lupescu/ethereum/cryptopp)
-
 if (NOT MSVC)
 	# Initialize CXXFLAGS for c++11
 
