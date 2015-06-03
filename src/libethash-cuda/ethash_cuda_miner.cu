@@ -343,7 +343,6 @@ __device__ uint inner_loop(uint4 init, uint thread_id, uint* share, hash128_t co
 		*share = mix.x;
 
 	__syncthreads();
-	__threadfence_block();
 	uint init0 = *share;
 
 	uint a = 0;
@@ -360,7 +359,6 @@ __device__ uint inner_loop(uint4 init, uint thread_id, uint* share, hash128_t co
 				*share = fnv(init0 ^ (a+i), m[i]) % DAG_SIZE;
 			}
 			__syncthreads();
-			__threadfence_block();
 
 			mix = fnv4(mix, g_dag[*share].uint4s[thread_id]);
 		}
@@ -540,10 +538,10 @@ __global__ void ethash_search(
 #if __USE_SHARED_MEMORY__
 	__shared__ compute_hash_share share[HASHES_PER_LOOP];
 
-	uint const gid = (blockIdx.x + gridDim.x  * blockIdx.y) * blockDim.x + threadIdx.x + blockDim.x * threadIdx.y;
+	uint const gid = blockDim.x * blockIdx.x + threadIdx.x;
 	hash32_t hash = compute_hash(share, g_header, g_dag, start_nonce + gid, isolate);
 #else
-	uint const gid = (blockIdx.x + gridDim.x  * blockIdx.y) * blockDim.x + threadIdx.x + blockDim.x * threadIdx.y;
+	uint const gid = blockDim.x * blockIdx.x + threadIdx.x;
 	hash32_t hash = compute_hash(share, g_header, g_dag, start_nonce + gid, isolate);
 #endif
 
@@ -640,7 +638,7 @@ void ethash_cuda_miner::hash(uint8_t* ret, uint8_t const* header, uint64_t nonce
 			temp_pending_batch.buf = buf;
 
 			// execute it!
-			ethash_hash<<<batch_count, m_workgroup_size>>>((hash32_t*)m_hash_buf[buf],
+				ethash_hash<<<batch_count/m_workgroup_size, m_workgroup_size>>>((hash32_t*)m_hash_buf[buf],
 					(const hash32_t*)m_header, (const hash128_t*)m_dag, nonce, ~0U);
 
 			pending.push(temp_pending_batch);
@@ -686,9 +684,7 @@ void ethash_cuda_miner::search(uint8_t const* header, uint64_t target, search_ho
 	for (uint64_t start_nonce = 0; ; start_nonce += c_search_batch_size)
 	{
 		// execute it!
-		dim3 dimGrid(512, c_search_batch_size/512, 1);
-		ethash_search<<<dimGrid, m_workgroup_size>>>((uint*)m_search_buf[buf],
-				(hash32_t const*)m_header, (hash128_t const*)m_dag, start_nonce, target, ~0U);
+		ethash_search<<<c_search_batch_size/256, 256>>>((uint*)m_search_buf[buf],(hash32_t const*)m_header, (hash128_t const*)m_dag, start_nonce, target, ~0U);
 
 		pending_batch_search temp_pending_batch;
 		temp_pending_batch.start_nonce = start_nonce;
